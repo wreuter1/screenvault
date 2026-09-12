@@ -1,10 +1,32 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>ScreenVault V1.0</title><style>
-body{margin:0;background:#080c16;color:#eaf0ff;font:15px system-ui}main{max-width:1100px;margin:auto;padding:30px}.card{background:#121a2b;border:1px solid #273552;border-radius:14px;padding:18px;margin:14px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.metric{font-size:30px;font-weight:800}input,button,select{padding:10px;border-radius:8px;border:1px solid #3a4968;background:#0e1524;color:white;margin:4px}button{cursor:pointer}.tag{background:#26385f;padding:4px 8px;border-radius:20px;font-size:12px}.muted{color:#98a6c4}pre{max-height:400px;overflow:auto}
-</style></head><body><main><h1>ScreenVault <span class="tag">V1.0 MVP</span></h1><p class="muted">Trust the person. Protect the production.</p>
-<div id="login" class="card"><input id="email" value="actor@screenvault.local"><input id="pw" type="password" value="ActorDemo123!"><button onclick="login()">Sign in</button><p id="err"></p></div>
-<section id="dash" hidden><div id="who"></div><div class="grid"><div class="card"><b>Identity</b><div id="identity" class="metric">—</div></div><div class="card"><b>Productions</b><div id="pc" class="metric">—</div></div><div class="card"><b>Auditions</b><div id="ac" class="metric">—</div></div></div>
-<div id="casting" class="card" hidden><h2>Production control</h2><input id="pn" placeholder="Production name"><select id="cls"><option>CONFIDENTIAL</option><option>RESTRICTED</option><option>PUBLIC</option></select><button onclick="prod()">Create</button><hr><input id="pid" placeholder="Production ID"><input id="aid" placeholder="Actor ID"><input id="at" placeholder="Audition title"><button onclick="invite()">Invite actor</button></div>
-<div class="card"><h2>Productions</h2><div id="prods"></div></div><div class="card"><h2>Secure auditions</h2><div id="aud"></div></div>
-<div class="card"><h2>Likeness Firewall</h2><input id="lpid" placeholder="Production ID"><button onclick="loadPolicy()">Load</button><div id="policy"></div></div>
-<div id="auditbox" class="card" hidden><h2>Security audit log</h2><pre id="logs"></pre></div><button onclick="logout()">Log out</button></section>
-<script src="app.js"></script></main></body></html>
+let csrf="",me=null;const $=x=>document.getElementById(x);
+async function api(u,o={}){o.headers={...(o.headers||{}),"Content-Type":"application/json"};if(o.method&&o.method!=="GET")o.headers["x-csrf-token"]=csrf;let r=await fetch(u,o),d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||"Request failed");return d}
+async function login(){try{let d=await api("/api/login",{method:"POST",body:JSON.stringify({email:$("email").value,password:$("pw").value})});csrf=d.csrf;me=d.user;$("login").hidden=true;$("dash").hidden=false;render()}catch(e){$("err").textContent=e.message}}
+async function render(){$("who").innerHTML=`<b>${me.name}</b> <span class="tag">${me.role}</span>`;$("identity").textContent=me.verified?"✓ VERIFIED":"UNVERIFIED";if(me.role!=="ACTOR"){$("casting").hidden=false;$("auditbox").hidden=false}refresh()}
+async function refresh(){let[p,a]=await Promise.all([api("/api/productions"),api("/api/auditions")]);$("pc").textContent=p.length;$("ac").textContent=a.length;$("prods").innerHTML=p.map(x=>`<div class="card">#${x.id} <b>${esc(x.name)}</b> <span class="tag">${x.classification}</span></div>`).join("")||"None";$("aud").innerHTML=a.map(x=>`<div class="card">#${x.id} <b>${esc(x.title)}</b> — ${esc(x.production)} <span class="tag">${x.status}</span><br><button type="button" data-action="media" data-id="${x.id}">Protected media</button> <button type="button" data-action="prov" data-id="${x.id}">Provenance</button></div>`).join("")||"None";if(me.role!=="ACTOR")$("logs").textContent=JSON.stringify(await api("/api/audit"),null,2)}
+async function prod(){try{await api("/api/productions",{method:"POST",body:JSON.stringify({name:$("pn").value,classification:$("cls").value})});$("pn").value="";refresh()}catch(e){alert(e.message)}}
+async function invite(){try{await api("/api/auditions",{method:"POST",body:JSON.stringify({productionId:+$("pid").value,actorId:+$("aid").value,title:$("at").value})});refresh()}catch(e){alert(e.message)}}
+async function media(id){try{let d=await api(`/api/auditions/${id}/media-url`);alert("Authorized. Signed URL expires in 60 seconds.\\n"+location.origin+d.url)}catch(e){alert(e.message)}}
+async function prov(id){try{let d=await api(`/api/provenance/${id}`);alert(`SHA-256: ${d.sha256}\\nWatermark: ${d.watermark}\\nAI risk: ${d.ai_risk}`)}catch(e){alert(e.message)}}
+async function loadPolicy(){try{let d=await api(`/api/likeness/${+$("lpid").value}`),k=["feature_film","tv","promotion","ai_training","synthetic_performance","synthetic_voice","posthumous_replication"];$("policy").innerHTML=k.map(x=>`<label>${x.replaceAll("_"," ")} <input type="checkbox" id="p_${x}" ${d[x]?"checked":""}></label>`).join("")+`<button id="savePolicyBtn" type="button">Save permissions</button>`}catch(e){alert(e.message)}}
+async function savePolicy(){let k=["feature_film","tv","promotion","ai_training","synthetic_performance","synthetic_voice","posthumous_replication"],b=Object.fromEntries(k.map(x=>[x,$("p_"+x).checked]));try{await api(`/api/likeness/${+$("lpid").value}`,{method:"PUT",body:JSON.stringify(b)});alert("Saved")}catch(e){alert(e.message)}}
+async function logout(){try{await api("/api/logout",{method:"POST"})}finally{location.reload()}}
+function esc(x){return String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
+
+// Use event listeners instead of inline onclick handlers so the strict CSP can block inline JavaScript safely.
+document.addEventListener("DOMContentLoaded", () => {
+  $("loginBtn").addEventListener("click", login);
+  $("prodBtn").addEventListener("click", prod);
+  $("inviteBtn").addEventListener("click", invite);
+  $("loadPolicyBtn").addEventListener("click", loadPolicy);
+  $("logoutBtn").addEventListener("click", logout);
+  document.addEventListener("click", e => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    if (btn.id === "savePolicyBtn") return savePolicy();
+    if (!btn.dataset.action) return;
+    const id = Number(btn.dataset.id);
+    if (btn.dataset.action === "media") media(id);
+    if (btn.dataset.action === "prov") prov(id);
+  });
+});
